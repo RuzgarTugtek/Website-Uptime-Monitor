@@ -16,6 +16,8 @@ python -m unittest discover -s tests -v
 
 The report shows each site's check count, successful checks, uptime percentage, average successful-request latency, and latest state.
 
+SQLite connections are closed after every write and report, so history files can be moved, backed up, or deleted immediately on Windows as well as Unix-like systems.
+
 ## Arguments
 
 - `--url`: one HTTP(S) target (repeatable)

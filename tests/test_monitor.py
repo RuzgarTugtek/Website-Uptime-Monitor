@@ -4,7 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -58,13 +58,41 @@ class HttpTests(unittest.TestCase):
 
 
 class StorageAndCliTests(unittest.TestCase):
+    def test_storage_closes_database_connections(self):
+        connections = []
+        real_connect = sqlite3.connect
+
+        def tracking_connect(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "closed.sqlite3"
+            result = CheckResult(
+                "2026-11-14T10:00:00+00:00",
+                "https://example.com",
+                200,
+                10.5,
+                True,
+                None,
+            )
+            with patch("uptime_monitor.storage.sqlite3.connect", side_effect=tracking_connect):
+                save_result(database, result)
+                read_summary(database)
+
+            self.assertEqual(len(connections), 2)
+            for connection in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    connection.execute("SELECT 1")
+
     def test_sqlite_history(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "history.sqlite3"
             result = CheckResult("2026-11-14T10:00:00+00:00", "https://example.com", 200, 10.5, True, None)
             save_result(database, result)
             save_result(database, result)
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 rows = connection.execute("SELECT url, status_code, is_up FROM uptime_checks").fetchall()
             self.assertEqual(rows, [("https://example.com", 200, 1)] * 2)
 
@@ -118,7 +146,7 @@ class StorageAndCliTests(unittest.TestCase):
             stdout = StringIO()
             with redirect_stdout(stdout):
                 code = main(["--url", "https://example.com", "--db", str(database), "--json"])
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 count = connection.execute("SELECT COUNT(*) FROM uptime_checks").fetchone()[0]
         self.assertEqual(code, 0)
         self.assertEqual(count, 1)
